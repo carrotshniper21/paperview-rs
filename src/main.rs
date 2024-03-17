@@ -1,12 +1,3 @@
-//! Example for using cairo-xcb together with x11rb.
-//!
-//! The main ingredients are:
-//! - x11rb provides XCBConnection::get_raw_xcb_connection() to get a `*mut c_void` for the
-//!   underlying `xcb_connection_t`.
-//! - Only one XCB type is actually used in cairo-xcb's public API. This is `xcb_visualtype_t` for
-//!   which we provide an inline definition below.
-//!   (Alternatively, one could use `xcb::Visualtype` from the xcb crate; it's equivalent.)
-
 use x11rb::atom_manager;
 use x11rb::connection::Connection;
 use x11rb::errors::{ReplyError};
@@ -15,7 +6,6 @@ use x11rb::protocol::xproto::{ConnectionExt as _, *};
 use x11rb::xcb_ffi::XCBConnection;
 use std::{fs, path::{Path, PathBuf}};
 
-// A collection of the atoms we will need.
 atom_manager! {
     pub AtomCollection: AtomCollectionCookie {
         WM_PROTOCOLS,
@@ -25,7 +15,6 @@ atom_manager! {
     }
 }
 
-/// A rust version of XCB's `xcb_visualtype_t` struct. This is used in a FFI-way.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct xcb_visualtype_t {
@@ -54,16 +43,15 @@ impl From<Visualtype> for xcb_visualtype_t {
     }
 }
 
-/// Choose a visual to use. This function tries to find a depth=32 visual and falls back to the
-/// screen's default visual.
 fn choose_visual(conn: &impl Connection, screen_num: usize) -> Result<(u8, Visualid), ReplyError> {
-    let depth = 32;
+    let depth = 24;
     let screen = &conn.setup().roots[screen_num];
 
     // Try to use XRender to find a visual with alpha support
     let has_render = conn
         .extension_information(render::X11_EXTENSION_NAME)?
         .is_some();
+
     if has_render {
         let formats = conn.render_query_pict_formats()?.reply()?;
         // Find the ARGB32 format that must be supported.
@@ -79,8 +67,8 @@ fn choose_visual(conn: &impl Connection, screen_num: usize) -> Result<(u8, Visua
                 let d = info.direct;
                 (d.red_shift, d.green_shift, d.blue_shift, d.alpha_shift) == (16, 8, 0, 24)
             });
+
         if let Some(format) = format {
-            // Now we need to find the visual that corresponds to this format
             if let Some(visual) = formats.screens[screen_num]
                 .depths
                 .iter()
@@ -134,22 +122,22 @@ fn read_bitmap_files(directory_path: &str) -> Vec<PathBuf> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let image_dir = "/home/eatmynerds/repos/paperview/cyberpunk-bmp";
+
     println!("Loading images");
-    let bitmap_files = dbg!(read_bitmap_files(image_dir));
+
+    let bitmap_files = read_bitmap_files(image_dir);
 
     println!("Loading monitors");
 
-    let (conn, screen_num) = XCBConnection::connect(None)?;
-    let screen = &conn.setup().roots[screen_num];
-    println!("{:#?}", screen);
+    let (conn, current_screen) = XCBConnection::connect(None)?;
+    let screen = &conn.setup().roots[current_screen];
     let atoms = AtomCollection::new(&conn)?.reply()?;
-    let (mut width, mut height) = (100, 100);
-    let (depth, visualid) = choose_visual(&conn, screen_num)?;
-    println!("Using visual {:#x} with depth {}", visualid, depth);
+    let (mut width, mut height) = (3840, 1080);
+    let (depth, visualid) = choose_visual(&conn, current_screen)?;
 
-    // Check if a composite manager is running. In a real application, we should also react to a
-    // composite manager starting/stopping at runtime.
-    let transparency = composite_manager_running(&conn, screen_num)?;
+    println!("Screen: {}, width: {}, height: {}, depth: {}", current_screen, width, height, depth);
+
+    let transparency = composite_manager_running(&conn, current_screen)?;
     println!(
         "Composite manager running / working transparency: {:?}",
         transparency
